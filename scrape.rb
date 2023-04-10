@@ -252,17 +252,6 @@ class JobScraper
     crates = wrapper.elements(css: 'a.case-entity')
     crates.map(&:href)
   end
-
-  def test
-    @to_file = false
-    # crawl!
-    # stats_to_csv
-    
-    puts crates.length
-    crates.each do |crate|
-      ap crate.href
-    end
-  end
 end
 
 # some_cases = %w{ the-last-dance cobblestone-1v4 glovescase karambit_knives top_battle el-classico-case exclusive covert pickle-world diamond superior_overt maneki-neko knife hanami_case steel-samurai cyberpsycho lady_luck easy_m4 easy_ak47 easy_awp ct_pistols_farm t_pistols_farm desrt_eagle_farm easy_knife full-flash overtimes-case mid_case butterfly_knives easy-business}
