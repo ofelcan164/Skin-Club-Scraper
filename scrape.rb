@@ -4,7 +4,7 @@ require 'pry'
 require 'csv'
 
 class CaseScraper
-  attr_reader :case_items, :case_price, :case_name, :cases, :expected_return, :expected_profit, :crawling, :not_found, :to_file, :refresh_files, :urls, :home_url, :cur_url
+  attr_reader :case_items, :case_price, :case_name, :cases, :expected_return, :expected_profit, :crawling, :not_found, :to_file, :refresh_files, :urls, :home_url
 
   def initialize(cases: [], to_file: false, refresh_files: false)
     @case_items = []
@@ -18,7 +18,6 @@ class CaseScraper
     @expected_profit = 0
     @to_file = to_file
     @refresh_files = refresh_files
-    @urls = get_case_urls
   end
   
   def browser
@@ -50,26 +49,18 @@ class CaseScraper
 
   def crawl!
     @crawling = true
-    if cases.any?
-      cases.each do |c|
-        filename = "cases/#{c}.txt" if to_file
-        with_stdout_to_file(filename: filename) do
-          scrape_page(case_url(c))
-        end
+    get_case_urls
 
-        ap "--- Scraped #{filename.split('/').last[0...-4]} ---"
+    urls.each do |url|
+      case_name = url.split('/').last
+      filename = "cases/#{case_name}.txt" if to_file
+      with_stdout_to_file(filename: filename) do
+        scrape_page(url)
       end
-    else
-      urls.each do |url|
-        case_name = url.split('/').last
-        filename = "cases/#{case_name}.txt" if to_file
-        with_stdout_to_file(filename: filename) do
-          scrape_page(url)
-        end
 
-        ap "--- Scraped #{filename.split('/').last[0...-4]} ---"
-      end
+      ap "--- Scraped #{filename.split('/').last[0...-4]} ---"
     end
+
     filename = "max-min-stats.txt" if to_file
     with_stdout_to_file(filename: filename) do 
       puts_max_profit
@@ -147,8 +138,6 @@ class CaseScraper
   end
 
   def scrape_page(url)
-    @cur_url = url
-    puts url
     browser.goto url
     begin
       not_found_elm = browser.element(css: 'div.wrap-404')
@@ -176,17 +165,27 @@ class CaseScraper
       rows = wrapper.elements(css: 'div.row[data-v-515712f2][data-v-0adadd59]')
 
       on_screen_text(:items)
+      ap rows.length
+      puts '\n'
       rows.each do |item|
         next if item.classes.include? 'head'
         item.hover
         
-        # Add name?
+        name_wrapper = item.element(css: 'p.name').wait_until(&:present?)
+        name_wrapper.hover
+        name_wrapper.click!
+        name = clean_text(name_wrapper.element(css: 'span.weapon-name').wait_until(&:present?)) + ' | ' +
+          clean_text(name_wrapper.element(css: 'span.weapon-finish').wait_until(&:present?))
         price = clean_text(item.element(css: 'div.price-cell').wait_until(&:present?)).to_f
         chance = clean_text(item.element(css: 'div.odds-cell').wait_until(&:present?)).to_f / 100
     
         ap name unless crawling
         @case_items << {chance: chance, price: price}
       end
+
+      ap "-----Items Scraped!-----" unless crawling
+
+      ap @case_items
 
       get_return
       get_profit
@@ -260,11 +259,23 @@ class CaseScraper
   end
 
   def get_case_urls
-    browser.goto home_url
-    wrapper = browser.element(css: 'div#app-vue3').wait_until(&:present?)
-    wait_until_this = wrapper.element(css: 'div.feast-banner-inner').wait_until(&:present?)
-    crates = wrapper.elements(css: 'a.case-entity')
-    crates.map(&:href)
+    @urls = if cases.any?
+      cases.map do |c|
+        case_url(c)
+      end
+    else
+      browser.goto home_url
+      wrapper = browser.element(css: 'div#app-vue3').wait_until(&:present?)
+      wait_until_this = wrapper.element(css: 'div.feast-banner-inner').wait_until(&:present?)
+      crates = wrapper.elements(css: 'a.case-entity')
+      crates.map(&:href)
+    end
+
+    if urls.length == 0
+      puts 'retying getting case urls in 30 secs'
+      sleep 30
+      get_case_urls
+    end
   end
 
   def test
@@ -286,9 +297,11 @@ class CaseScraper
 end
 
 # some_cases = %w{ the-last-dance cobblestone-1v4 glovescase karambit_knives top_battle el-classico-case exclusive covert pickle-world diamond superior_overt maneki-neko knife hanami_case steel-samurai cyberpsycho lady_luck easy_m4 easy_ak47 easy_awp ct_pistols_farm t_pistols_farm desrt_eagle_farm easy_knife full-flash overtimes-case mid_case butterfly_knives easy-business}
-scraper = CaseScraper.new(to_file: true)
-scraper.crawl!
-# scraper.scrape_page 'https://skin.club/en/cases/open/rivalry_case'
-# scraper.stats_to_csv(ranking: :max_loss).
+scraper = CaseScraper.new(to_file: false)
+scraper.get_case_urls
+ap scraper.urls
+# scraper.crawl!
+# scraper.stats_to_csv
+# scraper.scrape_page 'https://skin.club/en/cases/open/el-classico-case'
 # scraper.test
 scraper.browser.close
