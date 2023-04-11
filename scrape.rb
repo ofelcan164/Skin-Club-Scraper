@@ -4,7 +4,7 @@ require 'pry'
 require 'csv'
 
 class CaseScraper
-  attr_reader :case_items, :case_price, :case_name, :cases, :expected_return, :expected_profit, :crawling, :not_found, :to_file, :refresh_files, :urls, :home_url
+  attr_reader :case_items, :case_price, :case_name, :cases, :expected_return, :expected_profit, :crawling, :not_found, :to_file, :refresh_files, :urls, :home_url, :cur_url
 
   def initialize(cases: [], to_file: false, refresh_files: false)
     @case_items = []
@@ -52,6 +52,7 @@ class CaseScraper
     get_case_urls
 
     urls.each do |url|
+      @curl_url = url
       case_name = url.split('/').last
       filename = "cases/#{case_name}.txt" if to_file
       with_stdout_to_file(filename: filename) do
@@ -59,6 +60,7 @@ class CaseScraper
       end
 
       ap "--- Scraped #{filename.split('/').last[0...-4]} ---"
+      sleep 10
     end
 
     filename = "max-min-stats.txt" if to_file
