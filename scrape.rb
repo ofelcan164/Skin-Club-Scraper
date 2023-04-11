@@ -174,22 +174,15 @@ class CaseScraper
       row_header.click!
       row_header.hover
       rows = wrapper.elements(css: 'div.row[data-v-515712f2][data-v-0adadd59]')
-      ap rows.length
-      rows.each do |a|
-        ap a.classes
-        # next if a.classes.include? 'head'
-        # a.hover
-        ap a.text
-      end
-
-      return # TODO REMOVE
 
       on_screen_text(:items)
-      items_wrapper = browser.element(css: 'div.items-list').wait_until(&:present?)
-      items = items_wrapper.elements(css: 'div.case-skin').each do |item|
-        name = clean_text item.element(css: 'span.case-skin__title').wait_until(&:present?)
-        price = clean_text(item.element(css: 'span.case-skin__price').wait_until(&:present?)).to_f
-        chance = clean_text(item.element(css: 'div.case-skin-chance p.chance-text').wait_until(&:present?)).to_f / 100
+      rows.each do |item|
+        next if item.classes.include? 'head'
+        item.hover
+        
+        # Add name?
+        price = clean_text(item.element(css: 'div.price-cell').wait_until(&:present?)).to_f
+        chance = clean_text(item.element(css: 'div.odds-cell').wait_until(&:present?)).to_f / 100
     
         ap name unless crawling
         @case_items << {chance: chance, price: price}
@@ -293,9 +286,9 @@ class CaseScraper
 end
 
 # some_cases = %w{ the-last-dance cobblestone-1v4 glovescase karambit_knives top_battle el-classico-case exclusive covert pickle-world diamond superior_overt maneki-neko knife hanami_case steel-samurai cyberpsycho lady_luck easy_m4 easy_ak47 easy_awp ct_pistols_farm t_pistols_farm desrt_eagle_farm easy_knife full-flash overtimes-case mid_case butterfly_knives easy-business}
-scraper = CaseScraper.new(to_file: false)
-# scraper.crawl!
-scraper.scrape_page 'https://skin.club/en/cases/open/rivalry_case'
+scraper = CaseScraper.new(to_file: true)
+scraper.crawl!
+# scraper.scrape_page 'https://skin.club/en/cases/open/rivalry_case'
 # scraper.stats_to_csv(ranking: :max_loss).
 # scraper.test
 scraper.browser.close
