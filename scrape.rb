@@ -3,7 +3,7 @@ require "watir"
 require 'pry'
 require 'csv'
 
-class JobScraper
+class CaseScraper
   attr_reader :case_items, :case_price, :case_name, :cases, :expected_return, :expected_profit, :crawling, :not_found, :to_file, :refresh_files, :urls, :home_url, :cur_url
 
   def initialize(cases: [], to_file: false, refresh_files: false)
@@ -148,6 +148,7 @@ class JobScraper
 
   def scrape_page(url)
     @cur_url = url
+    puts url
     browser.goto url
     begin
       not_found_elm = browser.element(css: 'div.wrap-404')
@@ -162,6 +163,26 @@ class JobScraper
       on_screen_text(:case_price)
       @case_price = clean_text(browser.element(css: 'span[data-qa="sticker_case_price_element"].price').wait_until(&:present?)).to_f
       ap @case_price unless crawling
+
+      button = browser.element(css: '[data-qa="check_odds_range_button"]')
+      button.click!
+
+      wrapper = browser.element(css: 'div.simplebar-content-wrapper').wait_until(&:present?)
+      wrapper.hover
+      wrapper.click!
+      row_header = wrapper.element(css: 'div.row.head').wait_until(&:present?)
+      row_header.click!
+      row_header.hover
+      rows = wrapper.elements(css: 'div.row[data-v-515712f2][data-v-0adadd59]')
+      ap rows.length
+      rows.each do |a|
+        ap a.classes
+        # next if a.classes.include? 'head'
+        # a.hover
+        ap a.text
+      end
+
+      return # TODO REMOVE
 
       on_screen_text(:items)
       items_wrapper = browser.element(css: 'div.items-list').wait_until(&:present?)
@@ -252,10 +273,29 @@ class JobScraper
     crates = wrapper.elements(css: 'a.case-entity')
     crates.map(&:href)
   end
+
+  def test
+    browser.goto home_url
+    wrapper = browser.element(css: 'div#app-vue3').wait_until(&:present?)
+    wait_until_this = wrapper.element(css: 'div.feast-banner-inner').wait_until(&:present?)
+    crates = wrapper.elements(css: 'a.case-entity')
+    crates.map(&:href)
+
+    i = 0
+    crates.each do |crate|
+      return if i == 10
+      browser.goto crate.href
+      i += 1
+    end
+
+    
+  end
 end
 
 # some_cases = %w{ the-last-dance cobblestone-1v4 glovescase karambit_knives top_battle el-classico-case exclusive covert pickle-world diamond superior_overt maneki-neko knife hanami_case steel-samurai cyberpsycho lady_luck easy_m4 easy_ak47 easy_awp ct_pistols_farm t_pistols_farm desrt_eagle_farm easy_knife full-flash overtimes-case mid_case butterfly_knives easy-business}
-scraper = JobScraper.new(to_file: true)
-scraper.crawl!
-scraper.stats_to_csv
+scraper = CaseScraper.new(to_file: false)
+# scraper.crawl!
+scraper.scrape_page 'https://skin.club/en/cases/open/rivalry_case'
+# scraper.stats_to_csv(ranking: :max_loss).
+# scraper.test
 scraper.browser.close
