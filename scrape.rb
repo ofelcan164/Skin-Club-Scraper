@@ -52,7 +52,7 @@ class CaseScraper
     get_case_urls
 
     urls.each do |url|
-      @curl_url = url
+      @cur_url = url
       case_name = url.split('/').last
       filename = "cases/#{case_name}.txt" if to_file
       with_stdout_to_file(filename: filename) do
