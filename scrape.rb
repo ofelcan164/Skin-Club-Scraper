@@ -60,7 +60,6 @@ class CaseScraper
       end
 
       ap "--- Scraped #{filename.split('/').last[0...-4]} ---"
-      sleep 10
     end
 
     filename = "max-min-stats.txt" if to_file
