@@ -199,7 +199,7 @@ class CaseScraper
       get_return
       get_profit
 
-      stats if !not_found && !refresh_files
+      stats unless not_found
       reset_values
     rescue Watir::Wait::TimeoutError => e
       puts e
@@ -277,7 +277,9 @@ class CaseScraper
         csv << ([i, x.first] + x.last.values)
       end
     end
+    filename = "stats_#{ranking.to_s}.csv"
     File.write("stats_#{ranking.to_s}.csv", file)
+    puts "----- Wrote to #{filename} ----- "
   end
 
   def get_case_urls
@@ -294,8 +296,8 @@ class CaseScraper
     end
 
     if urls.length == 0
-      puts 'retying getting case urls in 30 secs'
-      sleep 30
+      puts 'retrying getting case urls in 15 seconds'
+      sleep 15
       get_case_urls
     end
   end
@@ -323,10 +325,8 @@ class CaseScraper
 end
 
 # some_cases = %w{ the-last-dance cobblestone-1v4 glovescase karambit_knives top_battle el-classico-case exclusive covert pickle-world diamond superior_overt maneki-neko knife hanami_case steel-samurai cyberpsycho lady_luck easy_m4 easy_ak47 easy_awp ct_pistols_farm t_pistols_farm desrt_eagle_farm easy_knife full-flash overtimes-case mid_case butterfly_knives easy-business}
-scraper = CaseScraper.new(to_file: true)
+scraper = CaseScraper.new
 scraper.crawl!
 rankings = [nil, :expected_percent_profit, :expected_profit_dollars, :max_loss_percent, :max_loss, :max_gain_percent, :max_gain, :minimum_profit, :profit_chance]
 rankings.each { |r| scraper.stats_to_csv(ranking: r) }
-# scraper.scrape_page 'https://skin.club/en/cases/open/el-classico-case'
-# scraper.test
 scraper.browser.close
