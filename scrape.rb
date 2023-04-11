@@ -6,7 +6,7 @@ require 'csv'
 class CaseScraper
   attr_reader :case_items, :case_price, :case_name, :cases, :expected_return, :expected_profit, :crawling, :not_found, :to_file, :refresh, :urls, :home_url, :cur_url
 
-  def initialize(cases: [], to_file: false, refresh: true)
+  def initialize(cases: [], to_file: false, refresh: false)
     @case_items = []
     @case_price = 0
     @cases = cases
@@ -58,17 +58,15 @@ class CaseScraper
         filename = "cases/#{case_name}.txt" if to_file
         with_stdout_to_file(filename: filename) do
           scrape_page(url)
+          stats unless not_found
+          reset_values
         end
 
         ap "--- Scraped #{filename.split('/').last[0...-4]} ---" if to_file
       end
     else
-      if File.exists('stats_.csv')
-        @stats = CSV.read('stats_.csv', headers: true, header_converters: :symbol)
-        ap "--- Scraped stats from CSV ---"
-      else
-        ap "🔴🔴🔴🔴🔴🔴 Refresh set to false but stats_.csv not_found 🔴🔴🔴🔴🔴🔴"
-      end
+      load_stats
+      load_new_stats
     end
 
     filename = "max-min-stats.txt" if to_file
@@ -198,9 +196,6 @@ class CaseScraper
 
       get_return
       get_profit
-
-      stats unless not_found
-      reset_values
     rescue Watir::Wait::TimeoutError => e
       puts e
     end
@@ -226,36 +221,78 @@ class CaseScraper
     puts "Expected Profit $:"
     ap expected_profit
     puts "Expected Return %:"
-    ap expected_percent_return = (expected_return / case_price)*100 if case_price != 0
+    ap expected_percent_return = ((expected_return / case_price)*100 if case_price != 0) || 0
     puts "Expected Profit %:"
-    ap expected_percent_profit = (expected_profit / case_price)*100 if case_price != 0
+    ap expected_percent_profit = ((expected_profit / case_price)*100 if case_price != 0) || 0
     puts "Minimum Profit $:"
-    ap min_profit = case_items.map {  |item| item[:price] - case_price }.sort.reject { |item| item < 0 }.first
+    ap min_profit = case_items.map {  |item| item[:price] - case_price }.sort.reject { |item| item < 0 }.first || 0
+    puts "Minimum Profit %:"
+    ap min_profit_percent = ((min_profit / case_price)*100 if case_price != 0) || 0
+    puts "Minimum Loss $:"
+    ap min_loss = case_items.map { |item| item[:price] - case_price }.sort.reject { |item| item >= 0 }.last || 0
+    puts "Minimum Loss %:"
+    ap min_loss_percent = ((min_loss / case_price)*100 if case_price != 0) || 0
     puts "% Chance of Profit"
     profitable_items = case_items.reject {  |item| (item[:price] - case_price) < 0 }
-    ap profit_chance = profitable_items.map { |item| item[:chance] }.inject(&:+)
+    ap profit_chance = (profitable_items.map { |item| item[:chance] }.inject(&:+) || 0) * 100
     puts "Maximum Loss $:"
     ap max_loss = (case_price - (case_items.map { |x| x[:price] }).min).abs
     puts "Maximum Loss %:"
-    ap max_loss_percent = (max_loss / case_price)*100 if case_price != 0
+    ap max_loss_percent = ((max_loss / case_price)*100 if case_price != 0)  || 0
     puts "Maximum Gain $:"
     ap max_gain = (case_price - (case_items.map { |x| x[:price] }).max).abs
-    puts "Maximum Gain  %:"
-    ap max_gain_percent = (max_gain / case_price)*100 if case_price != 0
+    puts "Maximum Gain %:"
+    ap max_gain_percent = ((max_gain / case_price)*100 if case_price != 0)  || 0
 
     @stats[case_name] = { case_price: case_price, 
                           expected_return_dollars: expected_return, 
                           expected_profit_dollars: expected_profit, 
                           expected_percent_return: expected_percent_return, 
                           expected_percent_profit: expected_percent_profit,
-                          minimum_profit: min_profit,
+                          min_profit: min_profit,
+                          min_profit_percent: min_profit_percent,
                           profit_chance: profit_chance,
+                          min_loss: min_loss,
+                          min_loss_percent: min_loss_percent,
                           max_loss: max_loss,
                           max_loss_percent: max_loss_percent,
                           max_gain: max_gain,
                           max_gain_percent: max_gain_percent,
                           url: cur_url
                         }
+  end
+
+  def load_stats
+    if File.exists?('stats_.csv')
+      CSV.foreach('stats_.csv', headers: true, header_converters: :symbol) do |row|
+        row.delete(:rank)
+        name = row[:name]
+        row.delete(:name)
+        @stats[name] = row
+      end
+      ap "--- Scraped stats from CSV ---"
+    else
+      ap "🔴🔴🔴🔴🔴🔴 Refresh set to false but stats_.csv not_found 🔴🔴🔴🔴🔴🔴"
+    end
+  end
+
+  def load_new_stats
+    get_case_urls
+
+    stats_urls = @stats.map { |k,v| v[:url] }
+    urls.each do |url|
+      next if stats_urls.include?(url)
+      @cur_url = url
+      case_name = url.split('/').last
+      filename = "cases/#{case_name}.txt" if to_file
+      with_stdout_to_file(filename: filename) do
+        scrape_page(url)
+        stats unless not_found
+        reset_values
+      end
+
+      ap "--- Scraped #{filename.split('/').last[0...-4]} ---" if to_file
+    end
   end
 
   def get_stats
@@ -300,6 +337,11 @@ class CaseScraper
       sleep 15
       get_case_urls
     end
+
+    # Add free cases
+    @urls << case_url('lvl-3')
+    range = (10..120).step(10)
+    @urls += range.map { |x| case_url("lvl-#{x}")}
   end
 
   def refresh!
@@ -326,7 +368,9 @@ end
 
 # some_cases = %w{ the-last-dance cobblestone-1v4 glovescase karambit_knives top_battle el-classico-case exclusive covert pickle-world diamond superior_overt maneki-neko knife hanami_case steel-samurai cyberpsycho lady_luck easy_m4 easy_ak47 easy_awp ct_pistols_farm t_pistols_farm desrt_eagle_farm easy_knife full-flash overtimes-case mid_case butterfly_knives easy-business}
 scraper = CaseScraper.new
+# scraper.refresh!
 scraper.crawl!
-rankings = [nil, :expected_percent_profit, :expected_profit_dollars, :max_loss_percent, :max_loss, :max_gain_percent, :max_gain, :minimum_profit, :profit_chance]
+scraper.stats_to_csv
+rankings = [:expected_percent_profit, :expected_profit_dollars, :max_loss_percent, :max_loss, :max_gain_percent, :max_gain, :minimum_profit, :profit_chance, :min_loss_percent]
 rankings.each { |r| scraper.stats_to_csv(ranking: r) }
 scraper.browser.close
