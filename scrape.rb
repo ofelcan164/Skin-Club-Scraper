@@ -18,17 +18,17 @@ class CaseScraper
     @expected_profit = 0
     @to_file = to_file
     @refresh_files = refresh_files
+    Watir.default_timeout = 5
   end
   
   def browser
-    Watir.default_timeout = 5
     # configuring Chrome to run in headless mode
     options = Selenium::WebDriver::Chrome::Options.new 
     options.add_argument("--headless")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    @_browser ||= Watir::Browser.new(:chrome, options: options)
+    @browser ||= Watir::Browser.new(:chrome, options: options)
   end
 
   def reset_values
@@ -37,6 +37,10 @@ class CaseScraper
     @expected_return = 0
     @expected_profit = 0
     @not_found = false
+  end
+
+  def refresh_browser_state
+
   end
 
   def with_stdout_to_file(filename: nil)
@@ -59,7 +63,7 @@ class CaseScraper
         scrape_page(url)
       end
 
-      ap "--- Scraped #{filename.split('/').last[0...-4]} ---"
+      ap "--- Scraped #{filename.split('/').last[0...-4]} ---" if to_file
     end
 
     filename = "max-min-stats.txt" if to_file
@@ -163,14 +167,15 @@ class CaseScraper
       row_header = wrapper.element(css: 'div.row.head').wait_until(&:present?)
       row_header.click!
       row_header.hover
-      rows = wrapper.elements(css: 'div.row[data-v-515712f2][data-v-0adadd59]')
+      sleep 2
+      rows = wrapper.elements(css: 'div.row[data-v-515712f2][data-v-0adadd59].row')
 
       on_screen_text(:items)
       ap rows.length
-      puts '\n'
       rows.each do |item|
         next if item.classes.include? 'head'
         item.hover
+        item.click!
         
         name_wrapper = item.element(css: 'p.name').wait_until(&:present?)
         name_wrapper.hover
@@ -185,8 +190,6 @@ class CaseScraper
       end
 
       ap "-----Items Scraped!-----" unless crawling
-
-      ap @case_items
 
       get_return
       get_profit
@@ -300,7 +303,8 @@ end
 # some_cases = %w{ the-last-dance cobblestone-1v4 glovescase karambit_knives top_battle el-classico-case exclusive covert pickle-world diamond superior_overt maneki-neko knife hanami_case steel-samurai cyberpsycho lady_luck easy_m4 easy_ak47 easy_awp ct_pistols_farm t_pistols_farm desrt_eagle_farm easy_knife full-flash overtimes-case mid_case butterfly_knives easy-business}
 scraper = CaseScraper.new(to_file: true)
 scraper.crawl!
-scraper.stats_to_csv
+rankings = [:expected_percent_profit, :expected_profit_dollars, :max_loss_percent, :max_loss, :max_gain_percent, :max_gain]
+rankings.each { |r| scraper.stats_to_csv(ranking: r) }
 # scraper.scrape_page 'https://skin.club/en/cases/open/el-classico-case'
 # scraper.test
 scraper.browser.close
