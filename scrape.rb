@@ -4,9 +4,9 @@ require 'pry'
 require 'csv'
 
 class CaseScraper
-  attr_reader :case_items, :case_price, :case_name, :cases, :expected_return, :expected_profit, :crawling, :not_found, :to_file, :refresh_files, :urls, :home_url, :cur_url
+  attr_reader :case_items, :case_price, :case_name, :cases, :expected_return, :expected_profit, :crawling, :not_found, :to_file, :refresh, :urls, :home_url, :cur_url
 
-  def initialize(cases: [], to_file: false, refresh_files: false)
+  def initialize(cases: [], to_file: false, refresh: true)
     @case_items = []
     @case_price = 0
     @cases = cases
@@ -17,7 +17,7 @@ class CaseScraper
     @expected_return = 0
     @expected_profit = 0
     @to_file = to_file
-    @refresh_files = refresh_files
+    @refresh = refresh
     Watir.default_timeout = 5
   end
   
@@ -39,10 +39,6 @@ class CaseScraper
     @not_found = false
   end
 
-  def refresh_browser_state
-
-  end
-
   def with_stdout_to_file(filename: nil)
     old_stdout = STDOUT.clone
     $stdout.reopen(filename, 'w') if filename
@@ -55,15 +51,24 @@ class CaseScraper
     @crawling = true
     get_case_urls
 
-    urls.each do |url|
-      @cur_url = url
-      case_name = url.split('/').last
-      filename = "cases/#{case_name}.txt" if to_file
-      with_stdout_to_file(filename: filename) do
-        scrape_page(url)
-      end
+    if refresh
+      urls.each do |url|
+        @cur_url = url
+        case_name = url.split('/').last
+        filename = "cases/#{case_name}.txt" if to_file
+        with_stdout_to_file(filename: filename) do
+          scrape_page(url)
+        end
 
-      ap "--- Scraped #{filename.split('/').last[0...-4]} ---" if to_file
+        ap "--- Scraped #{filename.split('/').last[0...-4]} ---" if to_file
+      end
+    else
+      if File.exists('stats_.csv')
+        @stats = CSV.read('stats_.csv', headers: true, header_converters: :symbol)
+        ap "--- Scraped stats from CSV ---"
+      else
+        ap "🔴🔴🔴🔴🔴🔴 Refresh set to false but stats_.csv not_found 🔴🔴🔴🔴🔴🔴"
+      end
     end
 
     filename = "max-min-stats.txt" if to_file
@@ -224,6 +229,11 @@ class CaseScraper
     ap expected_percent_return = (expected_return / case_price)*100 if case_price != 0
     puts "Expected Profit %:"
     ap expected_percent_profit = (expected_profit / case_price)*100 if case_price != 0
+    puts "Minimum Profit $:"
+    ap min_profit = case_items.map {  |item| item[:price] - case_price }.sort.reject { |item| item < 0 }.first
+    puts "% Chance of Profit"
+    profitable_items = case_items.reject {  |item| (item[:price] - case_price) < 0 }
+    ap profit_chance = profitable_items.map { |item| item[:chance] }.inject(&:+)
     puts "Maximum Loss $:"
     ap max_loss = (case_price - (case_items.map { |x| x[:price] }).min).abs
     puts "Maximum Loss %:"
@@ -238,6 +248,8 @@ class CaseScraper
                           expected_profit_dollars: expected_profit, 
                           expected_percent_return: expected_percent_return, 
                           expected_percent_profit: expected_percent_profit,
+                          minimum_profit: min_profit,
+                          profit_chance: profit_chance,
                           max_loss: max_loss,
                           max_loss_percent: max_loss_percent,
                           max_gain: max_gain,
@@ -250,16 +262,22 @@ class CaseScraper
     @stats
   end
 
-  def stats_to_csv(ranking: :expected_percent_profit)
-    hashes = get_stats.sort_by { |k, h| h[ranking]}.reverse
+  def stats_to_csv(ranking: nil)
+    hashes = if ranking
+      get_stats.sort_by { |k, h| h[ranking]}.reverse
+    else
+      get_stats
+    end
+    # hashes looks like:
+    #   { <case_name> => { case_price: ..., expected_return_dollars: ..., expected_profit_dollars: ..., ..... }}
     column_names = [:rank, :name] + hashes.first.last.keys
-    s = CSV.generate do |csv|
+    file = CSV.generate do |csv|
       csv << column_names
       hashes.each.with_index(1) do |x, i|
         csv << ([i, x.first] + x.last.values)
       end
     end
-    File.write("stats_#{ranking.to_s}.csv", s)
+    File.write("stats_#{ranking.to_s}.csv", file)
   end
 
   def get_case_urls
@@ -280,6 +298,10 @@ class CaseScraper
       sleep 30
       get_case_urls
     end
+  end
+
+  def refresh!
+    @refresh = true
   end
 
   def test
@@ -303,7 +325,7 @@ end
 # some_cases = %w{ the-last-dance cobblestone-1v4 glovescase karambit_knives top_battle el-classico-case exclusive covert pickle-world diamond superior_overt maneki-neko knife hanami_case steel-samurai cyberpsycho lady_luck easy_m4 easy_ak47 easy_awp ct_pistols_farm t_pistols_farm desrt_eagle_farm easy_knife full-flash overtimes-case mid_case butterfly_knives easy-business}
 scraper = CaseScraper.new(to_file: true)
 scraper.crawl!
-rankings = [:expected_percent_profit, :expected_profit_dollars, :max_loss_percent, :max_loss, :max_gain_percent, :max_gain]
+rankings = [nil, :expected_percent_profit, :expected_profit_dollars, :max_loss_percent, :max_loss, :max_gain_percent, :max_gain, :minimum_profit, :profit_chance]
 rankings.each { |r| scraper.stats_to_csv(ranking: r) }
 # scraper.scrape_page 'https://skin.club/en/cases/open/el-classico-case'
 # scraper.test
