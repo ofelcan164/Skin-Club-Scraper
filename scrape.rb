@@ -297,11 +297,9 @@ class CaseScraper
 end
 
 # some_cases = %w{ the-last-dance cobblestone-1v4 glovescase karambit_knives top_battle el-classico-case exclusive covert pickle-world diamond superior_overt maneki-neko knife hanami_case steel-samurai cyberpsycho lady_luck easy_m4 easy_ak47 easy_awp ct_pistols_farm t_pistols_farm desrt_eagle_farm easy_knife full-flash overtimes-case mid_case butterfly_knives easy-business}
-scraper = CaseScraper.new(to_file: false)
-scraper.get_case_urls
-ap scraper.urls
-# scraper.crawl!
-# scraper.stats_to_csv
+scraper = CaseScraper.new(to_file: true)
+scraper.crawl!
+scraper.stats_to_csv
 # scraper.scrape_page 'https://skin.club/en/cases/open/el-classico-case'
 # scraper.test
 scraper.browser.close
