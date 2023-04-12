@@ -3,10 +3,10 @@ require "watir"
 require 'pry'
 require 'csv'
 
-class JobScraper
-  attr_reader :case_items, :case_price, :case_name, :cases, :expected_return, :expected_profit, :crawling, :not_found, :to_file, :refresh_files, :urls, :home_url, :cur_url
+class CaseScraper
+  attr_reader :case_items, :case_price, :case_name, :cases, :expected_return, :expected_profit, :crawling, :not_found, :to_file, :refresh, :urls, :home_url, :cur_url, :include_free
 
-  def initialize(cases: [], to_file: false, refresh_files: false)
+  def initialize(cases: [], to_file: false, refresh: false, include_free: false)
     @case_items = []
     @case_price = 0
     @cases = cases
@@ -17,19 +17,19 @@ class JobScraper
     @expected_return = 0
     @expected_profit = 0
     @to_file = to_file
-    @refresh_files = refresh_files
-    @urls = get_case_urls
+    @refresh = refresh
+    @include_free = include_free
+    Watir.default_timeout = 5
   end
   
   def browser
-    Watir.default_timeout = 5
     # configuring Chrome to run in headless mode
     options = Selenium::WebDriver::Chrome::Options.new 
     options.add_argument("--headless")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    @_browser ||= Watir::Browser.new(:chrome, options: options)
+    @browser ||= Watir::Browser.new(:chrome, options: options)
   end
 
   def reset_values
@@ -50,26 +50,27 @@ class JobScraper
 
   def crawl!
     @crawling = true
-    if cases.any?
-      cases.each do |c|
-        filename = "cases/#{c}.txt" if to_file
-        with_stdout_to_file(filename: filename) do
-          scrape_page(case_url(c))
-        end
+    get_case_urls
 
-        ap "--- Scraped #{filename.split('/').last[0...-4]} ---"
-      end
-    else
+    if refresh
       urls.each do |url|
+        @cur_url = url
         case_name = url.split('/').last
         filename = "cases/#{case_name}.txt" if to_file
         with_stdout_to_file(filename: filename) do
           scrape_page(url)
+          stats unless not_found
+          print_stats unless not_found
+          reset_values
         end
 
-        ap "--- Scraped #{filename.split('/').last[0...-4]} ---"
+        ap "--- Scraped #{filename.split('/').last[0...-4]} ---" if to_file
       end
+    else
+      add_new_stats
+      load_new_stats_from_site
     end
+
     filename = "max-min-stats.txt" if to_file
     with_stdout_to_file(filename: filename) do 
       puts_max_profit
@@ -109,7 +110,7 @@ class JobScraper
 
     puts "\n\n------------\n"
     ap "Bottom #{x} cases for max possible gain as a percent of case price"
-    ap ap top_x_by_(:max_gain_percent, x: x, dir: :bottom)
+    ap top_x_by_(:max_gain_percent, x: x, dir: :bottom)
   end
 
   def top_x_by_(col, x: 5, dir: :top)
@@ -147,7 +148,6 @@ class JobScraper
   end
 
   def scrape_page(url)
-    @cur_url = url
     browser.goto url
     begin
       not_found_elm = browser.element(css: 'div.wrap-404')
@@ -163,22 +163,41 @@ class JobScraper
       @case_price = clean_text(browser.element(css: 'span[data-qa="sticker_case_price_element"].price').wait_until(&:present?)).to_f
       ap @case_price unless crawling
 
+      button = browser.element(css: '[data-qa="check_odds_range_button"]')
+      button.click!
+
+      wrapper = browser.element(css: 'div.simplebar-content-wrapper').wait_until(&:present?)
+      wrapper.hover
+      wrapper.click!
+      row_header = wrapper.element(css: 'div.row.head').wait_until(&:present?)
+      row_header.click!
+      row_header.hover
+      sleep 2
+      rows = wrapper.elements(css: 'div.row[data-v-515712f2][data-v-0adadd59].row')
+
       on_screen_text(:items)
-      items_wrapper = browser.element(css: 'div.items-list').wait_until(&:present?)
-      items = items_wrapper.elements(css: 'div.case-skin').each do |item|
-        name = clean_text item.element(css: 'span.case-skin__title').wait_until(&:present?)
-        price = clean_text(item.element(css: 'span.case-skin__price').wait_until(&:present?)).to_f
-        chance = clean_text(item.element(css: 'div.case-skin-chance p.chance-text').wait_until(&:present?)).to_f / 100
+      ap rows.length
+      rows.each do |item|
+        next if item.classes.include? 'head'
+        item.hover
+        item.click!
+        
+        name_wrapper = item.element(css: 'p.name').wait_until(&:present?)
+        name_wrapper.hover
+        name_wrapper.click!
+        name = clean_text(name_wrapper.element(css: 'span.weapon-name').wait_until(&:present?)) + ' | ' +
+          clean_text(name_wrapper.element(css: 'span.weapon-finish').wait_until(&:present?))
+        price = clean_text(item.element(css: 'div.price-cell').wait_until(&:present?)).to_f
+        chance = clean_text(item.element(css: 'div.odds-cell').wait_until(&:present?)).to_f / 100
     
         ap name unless crawling
         @case_items << {chance: chance, price: price}
       end
 
+      ap "-----Items Scraped!-----" unless crawling
+
       get_return
       get_profit
-
-      stats if !not_found && !refresh_files
-      reset_values
     rescue Watir::Wait::TimeoutError => e
       puts e
     end
@@ -194,33 +213,71 @@ class JobScraper
     @expected_profit = expected_return - case_price 
   end
 
-  def stats
+  def print_stats
+    s = @stats[case_name]
     puts "Case Name:"
     ap case_name
     puts "Case Cost:"
-    ap case_price
+    ap s[:case_price]
     puts "Expected Return $:"
-    ap expected_return
+    ap s[:expected_return_dollars]
     puts "Expected Profit $:"
-    ap expected_profit
+    ap s[:expected_profit_dollars]
     puts "Expected Return %:"
-    ap expected_percent_return = (expected_return / case_price)*100 if case_price != 0
+    ap s[:expected_percent_return]
     puts "Expected Profit %:"
-    ap expected_percent_profit = (expected_profit / case_price)*100 if case_price != 0
+    ap s[:expected_percent_profit]
+    puts "Minimum Profit $:"
+    ap s[:min_profit]
+    puts "Minimum Profit %:"
+    ap s[:min_profit_percent]
+    puts "Minimum Loss $:"
+    ap s[:min_loss]
+    puts "Minimum Loss %:"
+    ap s[:min_loss_percent]
+    puts "Average Non-Profit Loss"
+    ap s[:avg_nonprofit_loss]
+    puts "% Chance of Profit"
+    ap s[:profit_chance]
     puts "Maximum Loss $:"
-    ap max_loss = (case_price - (case_items.map { |x| x[:price] }).min).abs
+    ap s[:max_loss]
     puts "Maximum Loss %:"
-    ap max_loss_percent = (max_loss / case_price)*100 if case_price != 0
+    ap s[:max_loss_percent]
     puts "Maximum Gain $:"
-    ap max_gain = (case_price - (case_items.map { |x| x[:price] }).max).abs
-    puts "Maximum Gain  %:"
-    ap max_gain_percent = (max_gain / case_price)*100 if case_price != 0
+    ap s[:max_gain]
+    puts "Maximum Gain %:"
+    ap s[:max_gain_percent]
+  end
+
+  def stats
+    expected_percent_return = ((expected_return / case_price)*100 if case_price != 0) || 100
+    expected_percent_profit = ((expected_profit / case_price)*100 if case_price != 0) || 100
+    min_profit = case_items.map {  |item| item[:price] - case_price }.sort.reject { |item| item < 0 }.first
+    min_profit_percent = ((min_profit / case_price)*100 if case_price != 0) if min_profit || 100
+    min_loss = case_items.map { |item| item[:price] - case_price }.sort.reject { |item| item >= 0 }.last || 0
+    min_loss_percent = ((min_loss / case_price)*100 if case_price != 0) || 100
+    avg_nonprofit_loss = case_items.reject { |item| (item[:price] - case_price) > 0 }.map { |item| item[:price] }
+    avg_nonprofit_loss_len = avg_nonprofit_loss.length
+    avg_nonprofit_loss = ((avg_nonprofit_loss.inject(&:+) / avg_nonprofit_loss_len) if avg_nonprofit_loss_len != 0) || -1*case_price
+    avg_nonprofit_loss_percent = (avg_nonprofit_loss / case_price) if case_price != 0 || 0
+    profitable_items = case_items.reject {  |item| (item[:price] - case_price) < 0 }
+    profit_chance = (profitable_items.map { |item| item[:chance] }.inject(&:+) || 0) * 100
+    max_loss = (case_price - (case_items.map { |x| x[:price] }).min).abs
+    max_loss_percent = ((max_loss / case_price)*100 if case_price != 0)  || 100
+    max_gain = (case_price - (case_items.map { |x| x[:price] }).max).abs
+    max_gain_percent = ((max_gain / case_price)*100 if case_price != 0)  || 100
 
     @stats[case_name] = { case_price: case_price, 
                           expected_return_dollars: expected_return, 
                           expected_profit_dollars: expected_profit, 
                           expected_percent_return: expected_percent_return, 
                           expected_percent_profit: expected_percent_profit,
+                          min_profit: min_profit,
+                          min_profit_percent: min_profit_percent,
+                          profit_chance: profit_chance,
+                          avg_nonprofit_loss: avg_nonprofit_loss,
+                          min_loss: min_loss,
+                          min_loss_percent: min_loss_percent,
                           max_loss: max_loss,
                           max_loss_percent: max_loss_percent,
                           max_gain: max_gain,
@@ -229,33 +286,137 @@ class JobScraper
                         }
   end
 
+  def load_stats
+    if File.exists?('stats_.csv')
+      CSV.foreach('stats_.csv', headers: true, header_converters: :symbol, converters: [CSV::Converters[:float]]) do |row|
+        row.delete(:rank)
+        name = row[:name]
+        row.delete(:name)
+        @stats[name] = row.to_h
+        @case_name = row[:name]
+        @case_price = row[:case_price]
+        @expected_return = row[:expected_return_dollars]
+        @expected_profit = row[:expected_profit_dollars]
+      end
+      ap "--- Scraped stats from CSV ---"
+    else
+      ap "🔴🔴🔴🔴🔴🔴 Refresh set to false but stats_.csv not_found 🔴🔴🔴🔴🔴🔴"
+    end
+  end
+
+  def load_new_stats_from_site
+    get_case_urls
+
+    stats_urls = @stats.map { |k,v| v[:url] }
+    urls.each do |url|
+      next if stats_urls.include?(url)
+      @cur_url = url
+      case_name = url.split('/').last
+      filename = "cases/#{case_name}.txt" if to_file
+      with_stdout_to_file(filename: filename) do
+        scrape_page(url)
+        stats unless not_found
+        print_stats unless not_found
+        reset_values
+      end
+
+      ap "--- Scraped #{filename.split('/').last[0...-4]} ---" if to_file
+    end
+  end
+
+  def add_new_stats
+    # TODO
+    load_stats
+    stats
+  end
+
   def get_stats
     @stats
   end
 
-  def stats_to_csv(ranking: :expected_percent_profit)
-    hashes = get_stats.sort_by { |k, h| h[ranking]}.reverse
+  def get_stats_headers
+    get_stats.first.last.keys.reject { |k| %i[case_price url].include?  k}
+  end
+
+  def stats_to_csv(ranking: nil)
+    hashes = if ranking
+      get_stats.sort_by { |k, h| h[ranking]}.reverse
+    else
+      get_stats
+    end
+    # hashes looks like:
+    #   { <case_name> => { case_price: ..., expected_return_dollars: ..., expected_profit_dollars: ..., ..... }}
     column_names = [:rank, :name] + hashes.first.last.keys
-    s = CSV.generate do |csv|
+    file = CSV.generate do |csv|
       csv << column_names
       hashes.each.with_index(1) do |x, i|
         csv << ([i, x.first] + x.last.values)
       end
     end
-    File.write("stats_#{ranking.to_s}.csv", s)
+    filename = if include_free
+      "stats_#{ranking.to_s}_with_free.csv"
+    else
+      "stats_#{ranking.to_s}.csv"
+    end
+    File.write("stats_#{ranking.to_s}.csv", file)
+    puts "----- Wrote to #{filename} ----- "
   end
 
   def get_case_urls
+    @urls = if cases.any?
+      cases.map do |c|
+        case_url(c)
+      end
+    else
+      browser.goto home_url
+      wrapper = browser.element(css: 'div#app-vue3').wait_until(&:present?)
+      wait_until_this = wrapper.element(css: 'div.feast-banner-inner').wait_until(&:present?)
+      crates = wrapper.elements(css: 'a.case-entity')
+      crates.map(&:href)
+    end
+
+    if urls.length == 0
+      puts 'retrying getting case urls in 15 seconds'
+      sleep 15
+      get_case_urls
+    end
+
+    # Add free cases
+    if include_free
+      @urls << case_url('lvl-3')
+      range = (10..120).step(10)
+      @urls += range.map { |x| case_url("lvl-#{x}")}
+    end
+  end
+
+  def refresh!
+    @refresh = true
+  end
+
+  def test
     browser.goto home_url
     wrapper = browser.element(css: 'div#app-vue3').wait_until(&:present?)
     wait_until_this = wrapper.element(css: 'div.feast-banner-inner').wait_until(&:present?)
     crates = wrapper.elements(css: 'a.case-entity')
     crates.map(&:href)
+
+    i = 0
+    crates.each do |crate|
+      return if i == 10
+      browser.goto crate.href
+      i += 1
+    end
+
+    
   end
 end
 
 # some_cases = %w{ the-last-dance cobblestone-1v4 glovescase karambit_knives top_battle el-classico-case exclusive covert pickle-world diamond superior_overt maneki-neko knife hanami_case steel-samurai cyberpsycho lady_luck easy_m4 easy_ak47 easy_awp ct_pistols_farm t_pistols_farm desrt_eagle_farm easy_knife full-flash overtimes-case mid_case butterfly_knives easy-business}
-scraper = JobScraper.new(to_file: true)
-scraper.crawl!
-scraper.stats_to_csv
+scraper = CaseScraper.new()
+# scraper.refresh!
+# scraper.crawl!
+# scraper.stats_to_csv
+scraper.load_stats
+rankings = scraper.get_stats_headers
+rankings.each { |r| scraper.stats_to_csv(ranking: r) }
 scraper.browser.close
